@@ -1,0 +1,136 @@
+#! /bin/bash
+
+#install_dir=/usr/lib64/java
+install_dir=/home/a121599/java/
+log_format=
+action=
+source=
+rm_files=1
+priority=0
+
+usage ()
+{
+    printf "USAGE\n"
+}
+
+# =============================================================================
+#   MAIN (or the closest thing to a main in a bash shell...)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Parses arguments (optionally overrides default values)
+# -----------------------------------------------------------------------------
+
+while true; do
+    case $1 in
+        -h | -\?)
+            usage | less -R
+            exit 0
+            ;;
+        --list)
+            update-alternatives --query java 2> /dev/null
+            if [ $? -ne 0 ]; then
+                printf "\e[1;31mJava not found in debian alternatives\e[0m\n"
+                exit 1
+            fi
+            exit 0
+            ;;
+        --no-rm)
+            rm_files=0
+            shift
+            ;;
+        --priority)
+            priority="$2"
+            if [[ ! "$priority" =~ ^[1-9][0-9]*$ ]]; then
+                priority=0
+                printf "\e[1;33mPriority arg must be a number, will use default value\e[0m\n"
+            elif [ "$priority" -le 0 ]; then
+                priority=0
+                printf "\e[1;33mPriority arg must be positive, will use default value\e[0m\n"
+            fi
+            shift 2
+            ;;
+        --install)
+            action="i"
+            source="$2"
+            if [ -f "$source" ]; then
+                if [[ "$source" =~ ^.*tar\.gz$ ]]; then
+                    printf "Extracting in %s\n" "$install_dir"
+                    build=$(basename $(tar tfzv "$source" --exclude='*/*' | tr -s ' ' ' ' | cut -d' ' -f6))
+                    sudo tar zxvf "$source" -C "$install_dir"
+                    if [ $? -ne 0 ]; then
+                        printf "\e[1;31mExtraction failed\e[0m\n"
+                        exit 1
+                    fi
+                    source=""$install_dir"/"$build""
+                elif [[ "$source" =~ ^.*/java$ ]]; then
+                    source=$(dirname $(dirname "$source"))
+                else
+                    printf "\e[1;31mOnly tar.gz archive are supported\e[0m\n"
+                    exit 1
+                fi
+            elif [ ! -f "$source"/bin/java ]; then
+                printf "\e[1;31mJava not found in %s\e[0m\n" "$source"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --set)
+            action="s"
+            shift
+            ;;
+        --remove)
+            action="r"
+            source="$2"
+            if [[ "$source" =~ ^.*/java$ ]]; then
+                source=$(dirname $(dirname "$source"))
+            elif [ ! -f "$source"/bin/java ]; then
+                printf "\e[1;31mJava not found in %s\e[0m\n" "$source"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --) # End of options
+            shift
+            break
+            ;;
+        -*) #Unknown option
+            printf "\e[1;33mUnknown option (ignored): %s\e[0m\n" "$1"
+            shift
+            ;;
+        *) #No more options, exit loop
+            break
+            ;;
+    esac
+done
+
+current_dir=$PWD
+cd "$source"
+source=$PWD
+cd "$current_dir"
+
+case "$action" in
+    i)
+        if [ "$priority" -eq 0 ]; then
+            priority=$(basename "$source" | sed s/jdk// | sed s/\_//g | sed s/\\.//g)
+        fi
+        printf "Installing java from '%s' with priority \n" "$source" "$priority"
+        command="sudo update-alternatives --install /usr/bin/java java "$source"/bin/java "$priority""
+        for bin in $(find "$source"/bin -executable -type f ! -name java); do
+            file=$(basename "$bin")
+            command=""$command" --slave /usr/bin/"$file" "$file" "$bin""
+        done
+        eval ${command}
+        ;;
+    r)
+        sudo update-alternatives --remove java "$source"/bin/java
+        if [ "$rm_files" -eq 1 ]; then
+            printf "Removing java files\n"
+            sudo rm -rf "$source"
+        fi
+        ;;
+    *)
+        ;;
+esac
+
+exit 0
